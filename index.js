@@ -57,44 +57,47 @@ async function startBot() {
         if (!msg.message) return;
 
         const remoteJid = msg.key.remoteJid;
-        const senderJid = jidNormalizedUser(msg.key.participant || msg.key.remoteJid);
-        const botOwnerJid = sock.user ? jidNormalizedUser(sock.user.id) : null;
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+        
+        // Ensure it's a group chat
+        if (!remoteJid || !remoteJid.endsWith('@g.us')) return;
+
+        // Extract message text safely across different message types
+        const text = msg.message.conversation || 
+                     msg.message.extendedTextMessage?.text || 
+                     msg.message.imageMessage?.caption || 
+                     msg.message.videoMessage?.caption || '';
 
         if (text.trim() === '.addxxjarvis') {
-            // Check 1: Ensure only the connected bot owner can run the command
-            if (!botOwnerJid || senderJid !== botOwnerJid) {
-                return; // Silently ignore if someone else types it
-            }
-
-            // Check 2: Ensure it is a group chat
-            if (!remoteJid.endsWith('@g.us')) {
-                await sock.sendMessage(remoteJid, { text: 'This command can only be executed inside a WhatsApp group.' }, { quoted: msg });
+            // Check if command is triggered by the owner/bot itself or a valid participant
+            const isFromMe = msg.key.fromMe;
+            
+            if (!isFromMe) {
+                // If sent by someone else, ignore completely
                 return;
             }
 
             try {
-                // Fetch fresh group metadata from WhatsApp servers
+                // Fetch group metadata to check admin permissions
                 const groupMetadata = await sock.groupMetadata(remoteJid);
                 const participants = groupMetadata.participants || [];
                 
-                const botParticipant = participants.find(p => jidNormalizedUser(p.id) === botOwnerJid);
+                const botUserJid = jidNormalizedUser(sock.user.id);
+                const botParticipant = participants.find(p => jidNormalizedUser(p.id) === botUserJid);
 
-                // Check 3: Strictly verify admin status using Baileys admin flags ('admin' or 'superadmin')
                 const isAdmin = botParticipant && (botParticipant.admin === 'admin' || botParticipant.admin === 'superadmin');
 
                 if (!isAdmin) {
-                    await sock.sendMessage(remoteJid, { text: 'Failure: Bot is not an admin in this group. Please promote the bot first.' }, { quoted: msg });
+                    await sock.sendMessage(remoteJid, { text: 'Failure: Bot is not an admin in this group. Please promote your bot account to admin first.' });
                     return;
                 }
 
-                // Official platform JID node update for Meta AI group inclusion
+                // Trigger Meta AI group invitation protocol node
                 await sock.groupParticipantsUpdate(remoteJid, ['11111111111@bot'], 'add');
 
-                await sock.sendMessage(remoteJid, { text: 'Meta AI added successfully.' }, { quoted: msg });
+                await sock.sendMessage(remoteJid, { text: 'Meta AI added successfully.' });
             } catch (error) {
                 const errorReason = error?.data?.message || error?.message || String(error);
-                await sock.sendMessage(remoteJid, { text: `Failure: ${errorReason}` }, { quoted: msg });
+                await sock.sendMessage(remoteJid, { text: `Failure: ${errorReason}` });
             }
         }
     });
