@@ -54,30 +54,41 @@ async function startBot() {
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
         const msg = messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+        if (!msg.message) return;
 
         const remoteJid = msg.key.remoteJid;
+        const senderJid = jidNormalizedUser(msg.key.participant || msg.key.remoteJid);
+        const botOwnerJid = sock.user ? jidNormalizedUser(sock.user.id) : null;
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
 
         if (text.trim() === '.addxxjarvis') {
+            // Check 1: Ensure only the connected bot owner can run the command
+            if (!botOwnerJid || senderJid !== botOwnerJid) {
+                return; // Silently ignore if someone else types it
+            }
+
+            // Check 2: Ensure it is a group chat
             if (!remoteJid.endsWith('@g.us')) {
                 await sock.sendMessage(remoteJid, { text: 'This command can only be executed inside a WhatsApp group.' }, { quoted: msg });
                 return;
             }
 
             try {
+                // Fetch fresh group metadata from WhatsApp servers
                 const groupMetadata = await sock.groupMetadata(remoteJid);
-                const botJid = jidNormalizedUser(sock.user.id);
-                const participant = groupMetadata.participants.find(p => jidNormalizedUser(p.id) === botJid);
+                const participants = groupMetadata.participants || [];
+                
+                const botParticipant = participants.find(p => jidNormalizedUser(p.id) === botOwnerJid);
 
-                const isAdmin = participant && (participant.admin === 'admin' || participant.superadmin === 'admin');
+                // Check 3: Strictly verify admin status using Baileys admin flags ('admin' or 'superadmin')
+                const isAdmin = botParticipant && (botParticipant.admin === 'admin' || botParticipant.admin === 'superadmin');
 
                 if (!isAdmin) {
-                    await sock.sendMessage(remoteJid, { text: 'Failure: Bot is not an admin in this group.' }, { quoted: msg });
+                    await sock.sendMessage(remoteJid, { text: 'Failure: Bot is not an admin in this group. Please promote the bot first.' }, { quoted: msg });
                     return;
                 }
 
-                // Official Meta AI platform service JID interaction node update
+                // Official platform JID node update for Meta AI group inclusion
                 await sock.groupParticipantsUpdate(remoteJid, ['11111111111@bot'], 'add');
 
                 await sock.sendMessage(remoteJid, { text: 'Meta AI added successfully.' }, { quoted: msg });
@@ -103,7 +114,6 @@ app.get('/', (req, res) => {
                 .status { font-weight: bold; margin: 15px 0; padding: 10px; border-radius: 4px; }
                 .connected { background: #d4edda; color: #155724; }
                 .disconnected { background: #f8d7da; color: #721c24; }
-                .connecting { background: #fff3cd; color: #856404; }
                 input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; }
                 button { background: #25d366; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; }
                 button:hover { background: #128c7e; }
@@ -151,7 +161,6 @@ app.post('/pair', async (req, res) => {
     res.redirect('/');
 });
 
-// Render dynamic port compatibility binding
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Dashboard server running on port ${PORT}`);
