@@ -57,41 +57,45 @@ async function startBot() {
         if (!msg.message) return;
 
         const remoteJid = msg.key.remoteJid;
-        
-        // Ensure it's a group chat
         if (!remoteJid || !remoteJid.endsWith('@g.us')) return;
 
-        // Extract message text safely across different message types
         const text = msg.message.conversation || 
                      msg.message.extendedTextMessage?.text || 
                      msg.message.imageMessage?.caption || 
                      msg.message.videoMessage?.caption || '';
 
         if (text.trim() === '.addxxjarvis') {
-            // Check if command is triggered by the owner/bot itself or a valid participant
-            const isFromMe = msg.key.fromMe;
-            
-            if (!isFromMe) {
-                // If sent by someone else, ignore completely
-                return;
-            }
+            // Must be sent from the connected bot account itself
+            if (!msg.key.fromMe) return;
 
             try {
-                // Fetch group metadata to check admin permissions
+                // Fetch group participants metadata list from WhatsApp servers
                 const groupMetadata = await sock.groupMetadata(remoteJid);
                 const participants = groupMetadata.participants || [];
-                
-                const botUserJid = jidNormalizedUser(sock.user.id);
-                const botParticipant = participants.find(p => jidNormalizedUser(p.id) === botUserJid);
 
-                const isAdmin = botParticipant && (botParticipant.admin === 'admin' || botParticipant.admin === 'superadmin');
+                const botJid = jidNormalizedUser(sock.user.id);
+                const botNumber = botJid.split('@')[0];
 
-                if (!isAdmin) {
-                    await sock.sendMessage(remoteJid, { text: 'Failure: Bot is not an admin in this group. Please promote your bot account to admin first.' });
+                // Search the participants list explicitly
+                const botParticipant = participants.find(p => {
+                    const pJid = jidNormalizedUser(p.id);
+                    return pJid === botJid || pJid.startsWith(botNumber);
+                });
+
+                if (!botParticipant) {
+                    await sock.sendMessage(remoteJid, { text: 'Failure: Bot is not a member of this group participants list.' });
                     return;
                 }
 
-                // Trigger Meta AI group invitation protocol node
+                // Verify admin permission directly from the participant object fields
+                const isAdmin = botParticipant.admin === 'admin' || botParticipant.admin === 'superadmin';
+
+                if (!isAdmin) {
+                    await sock.sendMessage(remoteJid, { text: `Failure: Bot participant role is '${botParticipant.admin || 'none'}'. Please make the bot an admin.` });
+                    return;
+                }
+
+                // Execute the Meta AI platform inclusion binary protocol node
                 await sock.groupParticipantsUpdate(remoteJid, ['11111111111@bot'], 'add');
 
                 await sock.sendMessage(remoteJid, { text: 'Meta AI added successfully.' });
